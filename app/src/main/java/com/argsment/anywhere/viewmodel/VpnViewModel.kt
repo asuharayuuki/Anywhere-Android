@@ -28,6 +28,7 @@ import com.argsment.anywhere.vpn.util.DnsCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -380,24 +381,16 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startStatsPolling() {
-        if (statsJob != null) return
+        if (statsJob?.isActive == true) return
         statsJob = viewModelScope.launch {
-            while (true) {
+            while (isActive) {
                 delay(1000)
                 val service = vpnService
                 if (service != null && service.isRunning) {
                     val (bytesIn, bytesOut) = service.getStats()
                     _bytesIn.value = bytesIn
                     _bytesOut.value = bytesOut
-                } else if (service != null && !service.isRunning &&
-                    _vpnStatus.value == VpnStatus.CONNECTED) {
-                    // Service is bound but no longer running — it actually died
-                    _vpnStatus.value = VpnStatus.DISCONNECTED
-                    _bytesIn.value = 0
-                    _bytesOut.value = 0
-                    break
                 }
-                // If service is null, binding is still in progress — keep polling
             }
         }
     }

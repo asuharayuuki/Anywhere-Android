@@ -1377,8 +1377,7 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                 try {
                     val length = input.read(buffer)
                     if (length <= 0) {
-                        if (!running) break
-                        continue
+                        break // EOF reached, TUN is closed or dead
                     }
 
                     totalBytesOut.addAndGet(length.toLong())

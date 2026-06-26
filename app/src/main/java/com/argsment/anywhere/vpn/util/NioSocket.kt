@@ -77,6 +77,8 @@ class NioSocket : Transport {
 
     private val pendingReceive = AtomicReference<Continuation<ByteArray?>?>(null)
     private val pendingSends = ConcurrentLinkedQueue<PendingSend>()
+    private var zeroReadCount = 0
+    private var zeroWriteCount = 0
 
     private class PendingSend(
         val data: ByteArray,
@@ -114,15 +116,30 @@ class NioSocket : Transport {
         private const val MAX_PENDING_SEND_BYTES = 4_194_304
 
         private val selectorThread = Thread({
+            var epollBugSpins = 0
             while (true) {
                 try {
-                    sharedSelector.select()
+                    // Use a short timeout to prevent 100% CPU if the Epoll bug strikes
+                    val selected = sharedSelector.select(100)
 
+                    var processedOps = false
                     while (true) {
                         val op = pendingOps.poll() ?: break
+                        processedOps = true
                         try { op() } catch (e: Exception) {
                             logger.debug("Pending op error: ${e.message}")
                         }
+                    }
+
+                    if (selected == 0 && !processedOps) {
+                        epollBugSpins++
+                        if (epollBugSpins > 100) {
+                            // Epoll bug detected: select() returned 0 immediately multiple times.
+                            // Sleep to yield CPU and break the tight spin loop.
+                            Thread.sleep(10)
+                        }
+                    } else {
+                        epollBugSpins = 0
                     }
 
                     val iter = sharedSelector.selectedKeys().iterator()
@@ -411,6 +428,7 @@ class NioSocket : Transport {
             val n = ch.read(buffer)
             when {
                 n > 0 -> {
+                    zeroReadCount = 0
                     buffer.flip()
                     val data = ByteArray(n)
                     buffer.get(data)
@@ -422,7 +440,14 @@ class NioSocket : Transport {
                     resumeSafe(cont) { it.resume(data) }
                 }
                 n == 0 -> {
-                    pendingReceive.set(cont)
+                    zeroReadCount++
+                    if (zeroReadCount > 100) {
+                        // 100 consecutive 0-byte reads while readable -> spin loop detected
+                        resumeSafe(cont) { it.resumeWithException(NioSocketError.ReceiveFailed("Zero read spin loop")) }
+                        forceCancel()
+                    } else {
+                        pendingReceive.set(cont)
+                    }
                 }
                 else -> {
                     resumeSafe(cont) { it.resume(null) }
@@ -453,6 +478,7 @@ class NioSocket : Transport {
     }
 
     override suspend fun send(data: ByteArray) {
+        if (data.isEmpty()) return
         val ch = channel ?: throw NioSocketError.NotConnected()
         if (!ch.isOpen) throw NioSocketError.NotConnected()
         if (queuedSendBytes() + data.size > MAX_PENDING_SEND_BYTES) {
@@ -500,6 +526,7 @@ class NioSocket : Transport {
     }
 
     override fun sendAsync(data: ByteArray) {
+        if (data.isEmpty()) return
         val ch = channel ?: return
         if (!ch.isOpen) return
         if (queuedSendBytes() + data.size > MAX_PENDING_SEND_BYTES) {
@@ -531,6 +558,7 @@ class NioSocket : Transport {
             try {
                 val written = ch.write(buffer)
                 if (written > 0) {
+                    zeroWriteCount = 0
                     send.offset += written
                     if (send.offset >= send.data.size) {
                         pendingSends.poll()
@@ -538,8 +566,25 @@ class NioSocket : Transport {
                             resumeSafe(cont) { it.resume(Unit) }
                         }
                     }
+                } else if (written == 0 && remaining == 0) {
+                    zeroWriteCount = 0
+                    pendingSends.poll()
+                    send.continuation?.let { cont ->
+                        resumeSafe(cont) { it.resume(Unit) }
+                    }
                 } else {
-                    break
+                    zeroWriteCount++
+                    if (zeroWriteCount > 100) {
+                        // 100 consecutive 0-byte writes while writable -> spin loop detected
+                        val err = NioSocketError.SendFailed("Zero write spin loop")
+                        pendingSends.poll()
+                        send.continuation?.let { cont ->
+                            resumeSafe(cont) { it.resumeWithException(err) }
+                        }
+                        forceCancel()
+                    } else {
+                        break
+                    }
                 }
             } catch (e: IOException) {
                 val err = NioSocketError.SendFailed(e.message ?: "Write failed")
