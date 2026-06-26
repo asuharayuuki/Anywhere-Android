@@ -57,6 +57,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.onUiVisible()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleDeepLinkIntent(intent)
@@ -66,6 +71,11 @@ class MainActivity : ComponentActivity() {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
         viewModel.onDeepLink(uri)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.onUiHidden()
     }
 
     override fun onDestroy() {

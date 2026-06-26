@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -130,31 +131,32 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             val localBinder = binder as? AnywhereVpnService.LocalBinder ?: return
             vpnService = localBinder.service
             serviceBound = true
-
-            // The binder is delivered after `onStartCommand` has returned,
-            // so `isRunning` reflects whether `startVpn` set up the TUN and
-            // lwIP stack successfully.
-            if (localBinder.service.isRunning) {
-                _vpnStatus.value = VpnStatus.CONNECTED
-                startStatsPolling()
-                selectedConfiguration?.let { syncProxyServerAddresses(it) }
-            } else if (_vpnStatus.value == VpnStatus.CONNECTING) {
-                // Service bound but tunnel setup failed (e.g. TUN establish
-                // failed) — don't leave the UI stuck on the spinner.
-                _vpnStatus.value = VpnStatus.DISCONNECTED
-            }
+            selectedConfiguration?.let { syncProxyServerAddresses(it) }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             vpnService = null
             serviceBound = false
-            stopStatsPolling()
         }
     }
 
     val isButtonDisabled: Boolean
         get() = (selectedConfiguration == null) ||
             (_vpnStatus.value != VpnStatus.CONNECTED && _vpnStatus.value != VpnStatus.DISCONNECTED)
+
+    private var isUiVisible = false
+
+    fun onUiVisible() {
+        isUiVisible = true
+        if (_vpnStatus.value == VpnStatus.CONNECTED && serviceBound) {
+            startStatsPolling()
+        }
+    }
+
+    fun onUiHidden() {
+        isUiVisible = false
+        stopStatsPolling()
+    }
 
     init {
         val savedChainId = prefs.getString("selectedChainId", null)?.let {
@@ -182,6 +184,22 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
                 CertificatePolicy.setTrustedFingerprints(fingerprints)
                 if (first) { first = false; return@collect }
                 signalCertificatePolicyChanged()
+            }
+        }
+
+        viewModelScope.launch {
+            AnywhereVpnService.vpnState.collectLatest { isRunning ->
+                if (isRunning) {
+                    _vpnStatus.value = VpnStatus.CONNECTED
+                    if (isUiVisible) {
+                        startStatsPolling()
+                    }
+                } else {
+                    if (_vpnStatus.value == VpnStatus.CONNECTED || _vpnStatus.value == VpnStatus.CONNECTING) {
+                        _vpnStatus.value = VpnStatus.DISCONNECTED
+                        stopStatsPolling()
+                    }
+                }
             }
         }
     }

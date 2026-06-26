@@ -25,6 +25,13 @@ import com.argsment.anywhere.vpn.protocol.tls.CertificatePolicy
 import com.argsment.anywhere.vpn.util.AnywhereLogger
 import com.argsment.anywhere.vpn.util.DnsCache
 import com.argsment.anywhere.vpn.util.LogBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 
 /**
@@ -48,7 +55,11 @@ class AnywhereVpnService : VpnService() {
     private var lastUnderlyingTransports: Int = 0
     private var lastNetworkAvailable: Boolean = false
 
-    // Screen on/off used to approximate device-level sleep — Android doesn't
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        logger.debug("[VPN] Service created")
+    }
     // expose sleep/wake callbacks on a foreground VpnService directly, so we
     // listen on `ACTION_SCREEN_OFF` / `ACTION_SCREEN_ON` (or `ACTION_USER_PRESENT`
     // on locked devices) and infer the duration the device spent in low-power
@@ -57,6 +68,9 @@ class AnywhereVpnService : VpnService() {
     // replaced instead of waiting for keep-alive failures.
     private var screenStateReceiver: BroadcastReceiver? = null
     private var sleepTimestampMillis: Long = 0L
+
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var startJob: kotlinx.coroutines.Job? = null
 
     // Binder for activity communication
     private val binder = LocalBinder()
@@ -127,6 +141,8 @@ class AnywhereVpnService : VpnService() {
 
     override fun onDestroy() {
         stopVpn()
+        serviceScope.cancel()
+        instance = null
         super.onDestroy()
     }
 
@@ -148,27 +164,35 @@ class AnywhereVpnService : VpnService() {
     }
 
     private fun startVpn(config: ProxyConfiguration) {
-        // Stop the existing stack before starting a new one. lwIP uses global
-        // state (netif_default) and LWIP_SINGLE_NETIF asserts if netif_add() is
-        // called while a netif is already registered. We must wait for
-        // nativeShutdown() (which calls netif_remove → netif_default = NULL)
-        // to complete before calling nativeInit() (which calls netif_add).
-        lwipStack?.let { oldStack ->
-            lwipStack = null
-            val latch = java.util.concurrent.CountDownLatch(1)
-            oldStack.stop(onComplete = Runnable { latch.countDown() })
-            try {
-                latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
-            } catch (_: InterruptedException) {}
-            tunFd?.close()
-            tunFd = null
-        }
+        val previousStack = globalActiveStack
 
-        // Prime the cert-policy cache so the first TLS handshake uses the latest
+        lwipStack = null
+
+        startJob?.cancel()
+        startJob = serviceScope.launch {
+            if (previousStack != null) {
+                withContext(Dispatchers.IO) {
+                    if (!previousStack.lwipExecutor.isShutdown) {
+                        val latch = java.util.concurrent.CountDownLatch(1)
+                        previousStack.stop(onComplete = Runnable { latch.countDown() })
+                        try {
+                            latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                        } catch (_: InterruptedException) {}
+                    } else {
+                        try {
+                            previousStack.lwipExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
+                        } catch (_: InterruptedException) {}
+                    }
+                }
+                tunFd?.close()
+                tunFd = null
+            }
+
+            // Prime the cert-policy cache so the first TLS handshake uses the latest
         // prefs. The VPN service shares the app process on Android so VpnViewModel
         // would normally have already populated this cache, but a fresh process
         // (system-killed app + user-tapped reconnect) can race the first handshake.
-        CertificatePolicy.reload(this)
+        CertificatePolicy.reload(this@AnywhereVpnService)
 
         val effectiveConfig = applyGlobalAllowInsecure(config)
         logger.debug("[VPN] Starting tunnel to ${effectiveConfig.serverAddress}:${effectiveConfig.serverPort} " +
@@ -189,7 +213,7 @@ class AnywhereVpnService : VpnService() {
         val fd = buildTunInterface(effectiveConfig) ?: run {
             logger.error("[VPN] Failed to set tunnel settings: Failed to establish TUN interface")
             stopSelf()
-            return
+            return@launch
         }
         tunFd = fd
 
@@ -209,8 +233,10 @@ class AnywhereVpnService : VpnService() {
         // bypasses the VPN tunnel.
         findUnderlyingNetwork()?.let { DnsCache.setUnderlyingNetwork(it) }
 
-        val stack = LwipStack(this)
+        val stack = LwipStack(this@AnywhereVpnService)
         lwipStack = stack
+        globalActiveStack = stack
+        vpnState.value = true
 
         // Wire logger sink so logger.info/.warning/.error forward to the
         // user-facing log buffer.
@@ -232,9 +258,13 @@ class AnywhereVpnService : VpnService() {
         // proactively restart connections after long periods of inactivity
         // (NAT rebinds, server-side idle sweeps).
         startScreenStateMonitoring()
+        }
     }
 
     private fun stopVpn() {
+        startJob?.cancel()
+        startJob = null
+
         stopNetworkMonitoring()
         stopScreenStateMonitoring()
         SocketProtector.clearProtector()
@@ -242,20 +272,23 @@ class AnywhereVpnService : VpnService() {
 
         val stack = lwipStack
         lwipStack = null
+        
+        val fdToClose = tunFd
+        tunFd = null
 
         if (stack != null) {
             // Use the completion callback so the TUN file descriptor is closed
             // AFTER the lwIP executor finishes draining — avoids racing with the
             // packet reader thread.
-            stack.stop(onComplete = Runnable { finishStopVpn() })
+            stack.stop(onComplete = Runnable { finishStopVpn(fdToClose) })
         } else {
-            finishStopVpn()
+            finishStopVpn(fdToClose)
         }
     }
 
-    private fun finishStopVpn() {
-        tunFd?.close()
-        tunFd = null
+    private fun finishStopVpn(fdToClose: ParcelFileDescriptor?) {
+        vpnState.value = false
+        fdToClose?.close()
 
         AnywhereLogger.logSink = null
 
@@ -631,6 +664,17 @@ class AnywhereVpnService : VpnService() {
     val isRunning: Boolean get() = lwipStack != null
 
     companion object {
+        var instance: AnywhereVpnService? = null
+            private set
+
+        val vpnState = MutableStateFlow(false)
+        var globalActiveStack: LwipStack? = null
+            private set
+
+        fun updateProxyServerAddressesGlobal(addresses: List<String>) {
+            instance?.updateProxyServerAddresses(addresses)
+        }
+
         private const val TAG = "AnywhereVPN"
         private const val NOTIFICATION_ID = 1
         const val ACTION_START = "com.argsment.anywhere.START"
