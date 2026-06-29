@@ -649,12 +649,6 @@ class AnywhereVpnService : VpnService() {
         notificationManager.notify(NOTIFICATION_ID, buildNotification(configName))
     }
 
-    /** Returns current traffic statistics (bytes in/out). */
-    fun getStats(): Pair<Long, Long> {
-        val stack = lwipStack ?: return 0L to 0L
-        return stack.totalBytesIn.get() to stack.totalBytesOut.get()
-    }
-
     /** Updates proxy server addresses to prevent routing loops. */
     fun updateProxyServerAddresses(addresses: List<String>) {
         lwipStack?.updateProxyServerAddresses(addresses)

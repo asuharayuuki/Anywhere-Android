@@ -58,7 +58,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.argsment.anywhere.R
 import com.argsment.anywhere.ui.components.PowerButton
-import com.argsment.anywhere.ui.components.TrafficStatsRow
 import com.argsment.anywhere.ui.theme.GradientConnectedEndDark
 import com.argsment.anywhere.ui.theme.GradientConnectedEndLight
 import com.argsment.anywhere.ui.theme.GradientConnectedStartDark
@@ -76,8 +75,6 @@ import com.argsment.anywhere.viewmodel.VpnViewModel
 @Composable
 fun HomeScreen(viewModel: VpnViewModel, contentPadding: PaddingValues = PaddingValues()) {
     val vpnStatus by viewModel.vpnStatus.collectAsState()
-    val bytesIn by viewModel.bytesIn.collectAsState()
-    val bytesOut by viewModel.bytesOut.collectAsState()
     val selectedConfigId by viewModel.selectedConfigId.collectAsState()
     val selectedChainId by viewModel.selectedChainId.collectAsState()
     val configurations by viewModel.configRepository.configurations.collectAsState()
@@ -202,29 +199,6 @@ fun HomeScreen(viewModel: VpnViewModel, contentPadding: PaddingValues = PaddingV
             )
 
             Spacer(modifier = Modifier.height(if (isConnected) 20.dp else 40.dp))
-
-            AnimatedVisibility(
-                visible = isConnected,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color.White.copy(alpha = 0.15f)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 20.dp)
-                ) {
-                    TrafficStatsRow(
-                        bytesIn = bytesIn,
-                        bytesOut = bytesOut,
-                        contentColor = Color.White,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
 
             if (selectedItemName != null) {
                 Card(

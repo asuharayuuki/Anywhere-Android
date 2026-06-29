@@ -62,12 +62,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     val vpnStatus: StateFlow<VpnStatus> = _vpnStatus.asStateFlow()
     private var pendingReconnect = false
 
-    private val _bytesIn = MutableStateFlow(0L)
-    val bytesIn: StateFlow<Long> = _bytesIn.asStateFlow()
-
-    private val _bytesOut = MutableStateFlow(0L)
-    val bytesOut: StateFlow<Long> = _bytesOut.asStateFlow()
-
     private val _selectedConfigId = MutableStateFlow<UUID?>(null)
     val selectedConfigId: StateFlow<UUID?> = _selectedConfigId.asStateFlow()
 
@@ -124,7 +118,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     private var vpnService: AnywhereVpnService? = null
     private var serviceBound = false
-    private var statsJob: Job? = null
     private var pendingConnectAfterPermission = false
 
     private val serviceConnection = object : ServiceConnection {
@@ -144,20 +137,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     val isButtonDisabled: Boolean
         get() = (selectedConfiguration == null) ||
             (_vpnStatus.value != VpnStatus.CONNECTED && _vpnStatus.value != VpnStatus.DISCONNECTED)
-
-    private var isUiVisible = false
-
-    fun onUiVisible() {
-        isUiVisible = true
-        if (_vpnStatus.value == VpnStatus.CONNECTED && serviceBound) {
-            startStatsPolling()
-        }
-    }
-
-    fun onUiHidden() {
-        isUiVisible = false
-        stopStatsPolling()
-    }
 
     init {
         val savedChainId = prefs.getString("selectedChainId", null)?.let {
@@ -192,13 +171,9 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             AnywhereVpnService.vpnState.collectLatest { isRunning ->
                 if (isRunning) {
                     _vpnStatus.value = VpnStatus.CONNECTED
-                    if (isUiVisible) {
-                        startStatsPolling()
-                    }
                 } else {
                     if (_vpnStatus.value == VpnStatus.CONNECTED || _vpnStatus.value == VpnStatus.CONNECTING) {
                         _vpnStatus.value = VpnStatus.DISCONNECTED
-                        stopStatsPolling()
                     }
                 }
             }
@@ -313,8 +288,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         _vpnStatus.value = VpnStatus.DISCONNECTING
         val context = getApplication<Application>()
 
-        stopStatsPolling()
-
         val intent = Intent(context, AnywhereVpnService::class.java).apply {
             action = AnywhereVpnService.ACTION_STOP
         }
@@ -323,8 +296,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) {}
 
         unbindFromService()
-        _bytesIn.value = 0
-        _bytesOut.value = 0
         _vpnStatus.value = VpnStatus.DISCONNECTED
 
         if (pendingReconnect) {
@@ -380,26 +351,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
         serviceBound = false
     }
 
-    private fun startStatsPolling() {
-        if (statsJob?.isActive == true) return
-        statsJob = viewModelScope.launch {
-            while (isActive) {
-                delay(1000)
-                val service = vpnService
-                if (service != null && service.isRunning) {
-                    val (bytesIn, bytesOut) = service.getStats()
-                    _bytesIn.value = bytesIn
-                    _bytesOut.value = bytesOut
-                }
-            }
-        }
-    }
-
-    private fun stopStatsPolling() {
-        statsJob?.cancel()
-        statsJob = null
-    }
-
     /**
      * Resolves server address to IP before tunnel starts (avoids DNS-over-tunnel loop).
      * If already an IP, returns config as-is. If a domain, resolves via system DNS.
@@ -435,7 +386,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        stopStatsPolling()
         unbindFromService()
     }
 

@@ -34,6 +34,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
             <!-- Deep links: anywhere://add-proxy?link=… and bare proxy URL schemes. Mirrors iOS DeepLinkManager. -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />

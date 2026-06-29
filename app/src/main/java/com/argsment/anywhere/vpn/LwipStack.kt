@@ -86,10 +86,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
     var bypassCountryCode: String = ""
         private set
 
-    /** Global traffic counters. */
-    val totalBytesIn = AtomicLong(0)
-    val totalBytesOut = AtomicLong(0)
-
     /** All proxy server addresses (domains and resolved IPs) from all configurations.
      *  Prevents routing loops when proxy server domains match routing rules. */
     private var proxyServerAddresses: Set<String> = emptySet()
@@ -377,8 +373,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
 
         lwipExecutor.execute {
             running = true
-            totalBytesIn.set(0)
-            totalBytesOut.set(0)
 
             loadBypassCountry()
             loadEncryptedDnsSettings()
@@ -542,9 +536,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
      * Does NOT change [running] — callers manage it.
      */
     private fun shutdownInternal() {
-        totalBytesIn.set(0)
-        totalBytesOut.set(0)
-
         timeoutTimer?.cancel(false)
         timeoutTimer = null
         udpCleanupTimer?.cancel(false)
@@ -813,7 +804,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
     }
 
     override fun onOutput(packet: ByteArray, length: Int, isIpv6: Boolean) {
-        totalBytesIn.addAndGet(length.toLong())
         // Accumulate packets for batched write. onOutput is called from within
         // nativeInput/nativeTimerPoll on the lwipExecutor; the deferred flush runs
         // after the current lwIP processing cycle completes, reducing per-packet
@@ -1380,8 +1370,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                         break // EOF reached, TUN is closed or dead
                     }
 
-                    totalBytesOut.addAndGet(length.toLong())
-
                     val packet = packetPool.poll() ?: ByteArray(1500)
                     System.arraycopy(buffer, 0, packet, 0, length)
 
@@ -1392,7 +1380,6 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                         if (avail <= 0) break
                         val len = input.read(buffer)
                         if (len <= 0) break
-                        totalBytesOut.addAndGet(len.toLong())
                         val pkt = packetPool.poll() ?: ByteArray(1500)
                         System.arraycopy(buffer, 0, pkt, 0, len)
                         batch.add(Pair(pkt, len))
