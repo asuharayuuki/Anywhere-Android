@@ -30,6 +30,7 @@
     <string name="edit_configuration">Edit Configuration</string>
     <string name="enable_anyway">Enable Anyway</string>
     <string name="encryption">Encryption</string>
+    <string name="requests">Requests</string>
     <string name="fingerprint">Fingerprint</string>
     <string name="flow">Flow</string>
     <string name="go_to_settings">Go to Settings</string>
@@ -165,6 +166,9 @@
     <string name="rule_list_url">Anywhere Rule List URL</string>
     <string name="unknown_content">Unknown content.</string>
     <string name="import_action">Import</string>
+    <string name="subscribe_rule_set">Subscribe Rule Set</string>
+    <string name="subscribe_rule_set_url">Anywhere Routing Rule Set URL</string>
+    <string name="subscribe">Subscribe</string>
     <string name="parsed_rules">%1$d rule(s)</string>
     <string name="example_domain">example.com</string>
     <string name="example_keyword">example</string>

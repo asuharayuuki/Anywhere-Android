@@ -158,4 +158,5 @@
 
     <!-- HTTP/3 -->
     <string name="not_yet_supported">暂不支持</string>
+    <string name="requests">请求</string>
 </resources>

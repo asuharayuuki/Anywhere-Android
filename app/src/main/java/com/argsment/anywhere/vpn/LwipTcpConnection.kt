@@ -180,6 +180,8 @@ class LwipTcpConnection(
     private fun beginConnecting() {
         if (closed || vlessConnecting || directConnecting) return
         if (vlessConnection != null || directRelay != null) return
+        val routeTarget = if (bypass) RouteAction.Direct else RouteAction.Proxy(configuration.id)
+        AnywhereVpnService.instance?.requestLog?.record("TCP", dstHost, dstPort, routeTarget)
         if (bypass) connectDirect() else connectProxy()
     }
 
@@ -210,6 +212,7 @@ class LwipTcpConnection(
                 bypass = true
             }
             RouteAction.Reject -> {
+                AnywhereVpnService.instance?.requestLog?.record("TCP", sni, dstPort, RouteAction.Reject)
                 logger.debug("[TCP] SNI rejected by routing rule: $sni ($dstHost:$dstPort)")
                 rejectGracefully()
             }

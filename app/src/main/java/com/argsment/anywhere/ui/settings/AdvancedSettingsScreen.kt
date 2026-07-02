@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,18 +46,21 @@ fun AdvancedSettingsScreen(
     var showIpv6Settings by remember { mutableStateOf(false) }
     var showEncryptedDns by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
+    var showRequests by remember { mutableStateOf(false) }
 
-    val activeSubScreen = showIpv6Settings || showEncryptedDns || showLogs
+    val activeSubScreen = showIpv6Settings || showEncryptedDns || showLogs || showRequests
     BackHandler(enabled = activeSubScreen) {
         showIpv6Settings = false
         showEncryptedDns = false
         showLogs = false
+        showRequests = false
     }
 
     val currentRoute = when {
         showIpv6Settings -> "ipv6"
         showEncryptedDns -> "dns"
         showLogs -> "logs"
+        showRequests -> "requests"
         else -> "root"
     }
 
@@ -65,12 +69,14 @@ fun AdvancedSettingsScreen(
             "ipv6" -> Ipv6SettingsScreen(viewModel = viewModel, onBack = { showIpv6Settings = false })
             "dns" -> EncryptedDnsSettingsScreen(viewModel = viewModel, onBack = { showEncryptedDns = false })
             "logs" -> LogListScreen(onBack = { showLogs = false })
+            "requests" -> RequestsScreen(viewModel = viewModel, onBack = { showRequests = false })
             else -> AdvancedSettingsRoot(
                 viewModel = viewModel,
                 onBack = onBack,
                 onOpenIpv6 = { showIpv6Settings = true },
                 onOpenEncryptedDns = { showEncryptedDns = true },
-                onOpenLogs = { showLogs = true }
+                onOpenLogs = { showLogs = true },
+                onOpenRequests = { showRequests = true }
             )
         }
     }
@@ -83,7 +89,8 @@ private fun AdvancedSettingsRoot(
     onBack: () -> Unit,
     onOpenIpv6: () -> Unit,
     onOpenEncryptedDns: () -> Unit,
-    onOpenLogs: () -> Unit
+    onOpenLogs: () -> Unit,
+    onOpenRequests: () -> Unit
 ) {
     var experimentalEnabled by remember { mutableStateOf(viewModel.experimentalEnabled) }
     var remnawaveHWIDEnabled by remember { mutableStateOf(viewModel.remnawaveHWIDEnabled) }
@@ -140,6 +147,12 @@ private fun AdvancedSettingsRoot(
                 iconTint = Color(0xFF607D8B),
                 label = stringResource(R.string.logs),
                 onClick = onOpenLogs
+            )
+            SettingsNavRow(
+                icon = Icons.Filled.SwapHoriz,
+                iconTint = Color(0xFF03A9F4),
+                label = stringResource(R.string.requests),
+                onClick = onOpenRequests
             )
 
             Spacer(modifier = Modifier.height(16.dp))

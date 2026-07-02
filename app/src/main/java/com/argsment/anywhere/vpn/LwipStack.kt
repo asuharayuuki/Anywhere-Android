@@ -906,6 +906,7 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                         when (action) {
                             RouteAction.Direct -> forceBypass = true
                             RouteAction.Reject -> {
+                                AnywhereVpnService.instance?.requestLog?.record("TCP", dstIpString, dstPort, RouteAction.Reject)
                                 logger.debug("[TCP] IP rejected by routing rule: $dstIpString:$dstPort")
                                 return 0L
                             }
@@ -929,7 +930,10 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                     inheritChain(defaultConfig, it)
                 } ?: defaultConfig
             }
-            FakeIpResolution.Drop, FakeIpResolution.Unreachable -> return 0L
+            FakeIpResolution.Drop, FakeIpResolution.Unreachable -> {
+                AnywhereVpnService.instance?.requestLog?.record("TCP", dstIpString, dstPort, RouteAction.Reject)
+                return 0L
+            }
         }
 
         val connId = nextConnId.getAndIncrement()
@@ -1020,6 +1024,7 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                         when (action) {
                             RouteAction.Direct -> forceBypass = true
                             RouteAction.Reject -> {
+                                AnywhereVpnService.instance?.requestLog?.record("UDP", dstIpString, dstPort, RouteAction.Reject)
                                 sendIcmpPortUnreachable(srcIp, srcPort, dstIp, dstPort, isIpv6, data.size)
                                 return
                             }
@@ -1043,10 +1048,12 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
                 } ?: defaultConfig
             }
             FakeIpResolution.Drop -> {
+                AnywhereVpnService.instance?.requestLog?.record("UDP", dstIpString, dstPort, RouteAction.Reject)
                 sendIcmpPortUnreachable(srcIp, srcPort, dstIp, dstPort, isIpv6, data.size)
                 return
             }
             FakeIpResolution.Unreachable -> {
+                AnywhereVpnService.instance?.requestLog?.record("UDP", dstIpString, dstPort, RouteAction.Reject)
                 logger.debug("[FakeIP] UDP to $dstIpString:$dstPort — stale DNS cache (no pool entry)")
                 sendIcmpPortUnreachable(srcIp, srcPort, dstIp, dstPort, isIpv6, data.size)
                 return
@@ -1069,6 +1076,8 @@ class LwipStack(private val context: Context) : NativeBridge.LwipCallback {
             forceBypass = forceBypass,
             lwipExecutor = lwipExecutor
         )
+        val routeTarget = if (forceBypass) RouteAction.Direct else RouteAction.Proxy(flowConfig.id)
+        AnywhereVpnService.instance?.requestLog?.record("UDP", dstHost, dstPort, routeTarget)
         udpFlows[flowKey] = flow
         flow.handleReceivedData(data, data.size)
     }

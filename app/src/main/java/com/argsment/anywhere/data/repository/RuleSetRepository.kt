@@ -42,11 +42,17 @@ class RuleSetRepository(private val context: Context) {
     data class CustomRuleSet(
         val id: String,      // UUID string
         val name: String,
-        val rules: List<DomainRule> = emptyList()
+        val rules: List<DomainRule> = emptyList(),
+        val subscriptionUrl: String? = null
     ) {
         companion object {
-            fun newNamed(name: String): CustomRuleSet =
-                CustomRuleSet(id = UUID.randomUUID().toString(), name = name)
+            fun newNamed(name: String, rules: List<DomainRule> = emptyList(), subscriptionUrl: String? = null): CustomRuleSet =
+                CustomRuleSet(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    rules = rules,
+                    subscriptionUrl = subscriptionUrl
+                )
         }
     }
 
@@ -134,8 +140,8 @@ class RuleSetRepository(private val context: Context) {
         return affected
     }
 
-    fun addCustomRuleSet(name: String): CustomRuleSet {
-        val rs = CustomRuleSet.newNamed(name)
+    fun addCustomRuleSet(name: String, rules: List<DomainRule> = emptyList(), subscriptionUrl: String? = null): CustomRuleSet {
+        val rs = CustomRuleSet.newNamed(name, rules, subscriptionUrl)
         _customRuleSets.value = _customRuleSets.value + rs
         saveCustomRuleSets()
         rebuildRuleSets()
@@ -159,6 +165,42 @@ class RuleSetRepository(private val context: Context) {
                 rules = rules ?: rs.rules
             ) else rs
         }
+        if (updated == _customRuleSets.value) return
+        _customRuleSets.value = updated
+        saveCustomRuleSets()
+        rebuildRuleSets()
+    }
+
+    suspend fun refreshCustomRuleSet(id: String) {
+        val custom = customRuleSet(id) ?: return
+        val urlString = custom.subscriptionUrl ?: return
+        
+        val body = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val conn = java.net.URL(urlString).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            try {
+                val code = conn.responseCode
+                if (code !in 200..299) {
+                    throw IllegalStateException("HTTP $code")
+                }
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } finally {
+                conn.disconnect()
+            }
+        }
+        
+        val parsed = com.argsment.anywhere.data.rules.RoutingRuleParser.parse(body)
+        
+        val updated = _customRuleSets.value.map { rs ->
+            if (rs.id == id) {
+                rs.copy(
+                    name = if (parsed.name.isNotEmpty()) parsed.name else rs.name,
+                    rules = parsed.rules
+                )
+            } else rs
+        }
+        
         if (updated == _customRuleSets.value) return
         _customRuleSets.value = updated
         saveCustomRuleSets()

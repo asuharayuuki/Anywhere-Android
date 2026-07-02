@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.Rule
 import androidx.compose.material.icons.filled.Refresh
@@ -43,8 +44,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -118,7 +121,10 @@ private fun RuleSetListRoot(
     val experimentalEnabled = remember { viewModel.experimentalEnabled }
     var menuOpen by remember { mutableStateOf(false) }
     var showNewDialog by remember { mutableStateOf(false) }
+    var showSubscribeDialog by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    var subscribeError by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -148,6 +154,14 @@ private fun RuleSetListRoot(
                                     }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.subscribe_rule_set)) },
+                                leadingIcon = { Icon(Icons.Filled.Link, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    showSubscribeDialog = true
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.reset)) },
                                 leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
@@ -213,6 +227,63 @@ private fun RuleSetListRoot(
                 val created = viewModel.ruleSetRepository.addCustomRuleSet(name)
                 showNewDialog = false
                 onOpenCustom(created.id)
+            }
+        )
+    }
+
+    if (showSubscribeDialog) {
+        SubscribeRuleSetDialog(
+            onDismiss = { showSubscribeDialog = false },
+            onSubscribe = { url ->
+                showSubscribeDialog = false
+                coroutineScope.launch {
+                    try {
+                        val body = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                            conn.connectTimeout = 15000
+                            conn.readTimeout = 30000
+                            try {
+                                val code = conn.responseCode
+                                if (code !in 200..299) {
+                                    throw IllegalStateException("HTTP $code")
+                                }
+                                conn.inputStream.bufferedReader().use { it.readText() }
+                            } finally {
+                                conn.disconnect()
+                            }
+                        }
+                        
+                        val parsed = com.argsment.anywhere.data.rules.RoutingRuleParser.parse(body)
+                        val name = if (parsed.name.isNotEmpty()) parsed.name else "Subscription"
+                        
+                        val created = viewModel.ruleSetRepository.addCustomRuleSet(
+                            name = name, 
+                            rules = parsed.rules, 
+                            subscriptionUrl = url
+                        )
+                        parsed.routing.assignmentId?.let { assignId ->
+                            viewModel.ruleSetRepository.updateAssignment(
+                                viewModel.ruleSetRepository.ruleSets.value.first { it.id == created.id },
+                                assignId
+                            )
+                        }
+                        viewModel.syncRoutingConfigurationToNE()
+                        onOpenCustom(created.id)
+                    } catch (e: Exception) {
+                        subscribeError = e.message
+                    }
+                }
+            }
+        )
+    }
+
+    subscribeError?.let { errorMsg ->
+        AlertDialog(
+            onDismissRequest = { subscribeError = null },
+            title = { Text(stringResource(R.string.import_failed)) },
+            text = { Text(errorMsg) },
+            confirmButton = {
+                TextButton(onClick = { subscribeError = null }) { Text(stringResource(R.string.ok)) }
             }
         )
     }
@@ -326,6 +397,38 @@ private fun NewRuleSetDialog(
                 },
                 enabled = name.trim().isNotEmpty()
             ) { Text(stringResource(R.string.add)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        }
+    )
+}
+
+@Composable
+private fun SubscribeRuleSetDialog(
+    onDismiss: () -> Unit,
+    onSubscribe: (String) -> Unit
+) {
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.subscribe_rule_set)) },
+        text = {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                label = { Text(stringResource(R.string.subscribe_rule_set_url)) },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmed = url.trim()
+                    if (trimmed.isNotEmpty()) onSubscribe(trimmed)
+                },
+                enabled = url.trim().isNotEmpty()
+            ) { Text(stringResource(R.string.subscribe)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }

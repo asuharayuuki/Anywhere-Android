@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -70,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import com.argsment.anywhere.data.rules.RoutingRuleParser
 
 /**
  * Editor for a single user-created rule set.
@@ -128,6 +130,32 @@ fun CustomRuleSetDetailScreen(
                     }
                 },
                 actions = {
+                    val isSubscription = customRuleSet?.subscriptionUrl != null
+                    val scope = rememberCoroutineScope()
+                    var refreshing by remember { mutableStateOf(false) }
+
+                    if (isSubscription) {
+                        IconButton(onClick = {
+                            if (!refreshing) {
+                                refreshing = true
+                                scope.launch {
+                                    try {
+                                        viewModel.ruleSetRepository.refreshCustomRuleSet(customRuleSetId)
+                                        viewModel.syncRoutingConfigurationToNE()
+                                    } finally {
+                                        refreshing = false
+                                    }
+                                }
+                            }
+                        }) {
+                            if (refreshing) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                            }
+                        }
+                    }
+
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more))
@@ -136,16 +164,18 @@ fun CustomRuleSetDetailScreen(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.add_rule)) },
-                                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                                onClick = { menuOpen = false; showAddRule = true }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.import_rules)) },
-                                leadingIcon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
-                                onClick = { menuOpen = false; showImport = true }
-                            )
+                            if (!isSubscription) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.add_rule)) },
+                                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                    onClick = { menuOpen = false; showAddRule = true }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.import_rules)) },
+                                    leadingIcon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
+                                    onClick = { menuOpen = false; showImport = true }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.rename)) },
                                 leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
@@ -192,6 +222,7 @@ fun CustomRuleSetDetailScreen(
                 items(rules.size, key = { it }) { index ->
                     RuleRow(
                         rule = rules[index],
+                        readonly = customRuleSet?.subscriptionUrl != null,
                         onDelete = {
                             viewModel.ruleSetRepository.removeRules(customRuleSetId, listOf(index))
                             viewModel.syncRoutingConfigurationToNE()
@@ -237,7 +268,7 @@ fun CustomRuleSetDetailScreen(
 }
 
 @Composable
-private fun RuleRow(rule: DomainRule, onDelete: () -> Unit) {
+private fun RuleRow(rule: DomainRule, readonly: Boolean, onDelete: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -266,8 +297,10 @@ private fun RuleRow(rule: DomainRule, onDelete: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
+        if (!readonly) {
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
+            }
         }
     }
 }
@@ -461,7 +494,7 @@ private fun ImportRulesSheet(
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    val parsed = remember(text) { RuleParser.parse(text) }
+    val parsed = remember(text) { RoutingRuleParser.parse(text).rules }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -611,35 +644,4 @@ private fun RenameDialog(
     )
 }
 
-// Line format: "type, value" where type is 0 (IPv4 CIDR), 1 (IPv6 CIDR),
-// 2 (Domain Suffix), or 3 (Domain Keyword). Comment lines (#, //) and blanks
-// are ignored. Bare IPs are normalised to /32 (v4) and /128 (v6).
-internal object RuleParser {
 
-    fun parse(text: String): List<DomainRule> = text.lineSequence()
-        .mapNotNull { parseLine(it) }
-        .toList()
-
-    private fun parseLine(line: String): DomainRule? {
-        val trimmed = line.trim()
-        if (trimmed.isEmpty()) return null
-        if (trimmed.startsWith("#") || trimmed.startsWith("//")) return null
-
-        val commaIndex = trimmed.indexOf(',')
-        if (commaIndex < 0) return null
-        val prefix = trimmed.substring(0, commaIndex).trim()
-        val value = trimmed.substring(commaIndex + 1).trim()
-        if (value.isEmpty()) return null
-
-        val typeInt = prefix.toIntOrNull() ?: return null
-        val type = DomainRuleType.fromRawValue(typeInt) ?: return null
-        return DomainRule(type, normalize(value, type))
-    }
-
-    private fun normalize(value: String, type: DomainRuleType): String = when (type) {
-        DomainRuleType.IP_CIDR -> if ("/" in value) value else "$value/32"
-        DomainRuleType.IP_CIDR6 -> if ("/" in value) value else "$value/128"
-        DomainRuleType.DOMAIN_SUFFIX,
-        DomainRuleType.DOMAIN_KEYWORD -> value
-    }
-}

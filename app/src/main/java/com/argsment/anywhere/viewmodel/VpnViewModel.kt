@@ -90,20 +90,51 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingDeepLinkUrl = MutableStateFlow<String?>(null)
     val pendingDeepLinkUrl: StateFlow<String?> = _pendingDeepLinkUrl.asStateFlow()
 
+    private val _pendingRuleSetLinks = MutableStateFlow<List<String>>(emptyList())
+    val pendingRuleSetLinks: StateFlow<List<String>> = _pendingRuleSetLinks.asStateFlow()
+
+    private val _requests = MutableStateFlow<List<com.argsment.anywhere.vpn.util.RequestEntry>>(emptyList())
+    val requests: StateFlow<List<com.argsment.anywhere.vpn.util.RequestEntry>> = _requests.asStateFlow()
+    private var requestsJob: Job? = null
+
+    fun setRequestRecordingEnabled(enabled: Boolean) {
+        AnywhereVpnService.instance?.requestLog?.isRecordingEnabled = enabled
+        if (enabled) {
+            requestsJob?.cancel()
+            requestsJob = viewModelScope.launch {
+                AnywhereVpnService.instance?.requestLog?.requests?.collect {
+                    _requests.value = it
+                }
+            }
+        } else {
+            requestsJob?.cancel()
+            requestsJob = null
+            _requests.value = emptyList()
+        }
+    }
+
     fun onDeepLink(uri: android.net.Uri) {
         val scheme = uri.scheme?.lowercase() ?: return
         when (scheme) {
             "anywhere" -> {
-                if (uri.host != "add-proxy") return
-                val full = uri.toString()
-                val marker = "?link="
-                val idx = full.indexOf(marker)
-                if (idx < 0) return
-                val raw = full.substring(idx + marker.length)
-                if (raw.isEmpty()) return
-                _pendingDeepLinkUrl.value = runCatching {
-                    com.argsment.anywhere.data.model.percentDecode(raw)
-                }.getOrDefault(raw)
+                if (uri.host == "add-proxy") {
+                    val full = uri.toString()
+                    val marker = "?link="
+                    val idx = full.indexOf(marker)
+                    if (idx >= 0) {
+                        val raw = full.substring(idx + marker.length)
+                        if (raw.isNotEmpty()) {
+                            _pendingDeepLinkUrl.value = runCatching {
+                                com.argsment.anywhere.data.model.percentDecode(raw)
+                            }.getOrDefault(raw)
+                        }
+                    }
+                } else if (uri.host == "add-rule-set") {
+                    val links = uri.getQueryParameters("link").filter { it.isNotBlank() }
+                    if (links.isNotEmpty()) {
+                        _pendingRuleSetLinks.value = links
+                    }
+                }
             }
             "vless", "trojan", "ss", "socks5", "socks" -> {
                 _pendingDeepLinkUrl.value = uri.toString()
@@ -114,6 +145,10 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumePendingDeepLink() {
         _pendingDeepLinkUrl.value = null
+    }
+
+    fun clearPendingRuleSetLinks() {
+        _pendingRuleSetLinks.value = emptyList()
     }
 
     private var vpnService: AnywhereVpnService? = null

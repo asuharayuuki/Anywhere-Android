@@ -51,6 +51,8 @@ class AnywhereVpnService : VpnService() {
     // path changes (e.g. Wi-Fi → Cellular) and restart the lwIP stack to
     // replace stale connections bound to the old interface.
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    val requestLog = com.argsment.anywhere.vpn.util.RequestLog()
     private var lastUnderlyingNetwork: Network? = null
     private var lastUnderlyingTransports: Int = 0
     private var lastNetworkAvailable: Boolean = false
