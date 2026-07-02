@@ -365,6 +365,22 @@ class AnywhereVpnService : VpnService() {
         // Session name for system UI
         builder.setSession("Anywhere VPN")
 
+        // Add disallowed applications (Per-App Proxy / Bypass Apps)
+        val bypassApps = prefs.getStringSet("bypassApps", emptySet()) ?: emptySet()
+        if (bypassApps.isNotEmpty()) {
+            val pm = packageManager
+            for (pkg in bypassApps) {
+                try {
+                    // Make sure the app is still installed before adding it
+                    pm.getPackageInfo(pkg, 0)
+                    builder.addDisallowedApplication(pkg)
+                    logger.debug("[VPN] Bypassing app: $pkg")
+                } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+                    logger.debug("[VPN] Bypassed app not found (uninstalled?): $pkg")
+                }
+            }
+        }
+
         return try {
             builder.establish()
         } catch (e: Exception) {

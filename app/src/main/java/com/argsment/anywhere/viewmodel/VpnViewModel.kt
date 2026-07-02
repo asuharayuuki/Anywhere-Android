@@ -742,7 +742,15 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
      */
     var remnawaveHWIDEnabled: Boolean
         get() = prefs.getBoolean("remnawaveHWIDEnabled", false)
-        set(value) = prefs.edit().putBoolean("remnawaveHWIDEnabled", value).apply()
+        set(value) {
+            prefs.edit().putBoolean("remnawaveHWIDEnabled", value).apply()
+        }
+
+    var bypassApps: Set<String>
+        get() = prefs.getStringSet("bypassApps", emptySet()) ?: emptySet()
+        set(value) {
+            prefs.edit().putStringSet("bypassApps", value).apply()
+        }
 
     /**
      * Persistent per-install identifier used as the `x-hwid` header value for

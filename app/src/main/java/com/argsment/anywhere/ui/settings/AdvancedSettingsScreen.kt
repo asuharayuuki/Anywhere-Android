@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,13 +48,15 @@ fun AdvancedSettingsScreen(
     var showEncryptedDns by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }
     var showRequests by remember { mutableStateOf(false) }
+    var showPerAppProxy by remember { mutableStateOf(false) }
 
-    val activeSubScreen = showIpv6Settings || showEncryptedDns || showLogs || showRequests
+    val activeSubScreen = showIpv6Settings || showEncryptedDns || showLogs || showRequests || showPerAppProxy
     BackHandler(enabled = activeSubScreen) {
         showIpv6Settings = false
         showEncryptedDns = false
         showLogs = false
         showRequests = false
+        showPerAppProxy = false
     }
 
     val currentRoute = when {
@@ -61,6 +64,7 @@ fun AdvancedSettingsScreen(
         showEncryptedDns -> "dns"
         showLogs -> "logs"
         showRequests -> "requests"
+        showPerAppProxy -> "per_app_proxy"
         else -> "root"
     }
 
@@ -70,13 +74,15 @@ fun AdvancedSettingsScreen(
             "dns" -> EncryptedDnsSettingsScreen(viewModel = viewModel, onBack = { showEncryptedDns = false })
             "logs" -> LogListScreen(onBack = { showLogs = false })
             "requests" -> RequestsScreen(viewModel = viewModel, onBack = { showRequests = false })
+            "per_app_proxy" -> PerAppProxyScreen(viewModel = viewModel, onBack = { showPerAppProxy = false })
             else -> AdvancedSettingsRoot(
                 viewModel = viewModel,
                 onBack = onBack,
                 onOpenIpv6 = { showIpv6Settings = true },
                 onOpenEncryptedDns = { showEncryptedDns = true },
                 onOpenLogs = { showLogs = true },
-                onOpenRequests = { showRequests = true }
+                onOpenRequests = { showRequests = true },
+                onOpenPerAppProxy = { showPerAppProxy = true }
             )
         }
     }
@@ -90,7 +96,8 @@ private fun AdvancedSettingsRoot(
     onOpenIpv6: () -> Unit,
     onOpenEncryptedDns: () -> Unit,
     onOpenLogs: () -> Unit,
-    onOpenRequests: () -> Unit
+    onOpenRequests: () -> Unit,
+    onOpenPerAppProxy: () -> Unit
 ) {
     var experimentalEnabled by remember { mutableStateOf(viewModel.experimentalEnabled) }
     var remnawaveHWIDEnabled by remember { mutableStateOf(viewModel.remnawaveHWIDEnabled) }
@@ -137,6 +144,12 @@ private fun AdvancedSettingsRoot(
                 iconTint = Color(0xFF009688),
                 label = stringResource(R.string.encrypted_dns),
                 onClick = onOpenEncryptedDns
+            )
+            SettingsNavRow(
+                icon = Icons.Filled.Apps,
+                iconTint = Color(0xFF9C27B0), // Purple
+                label = stringResource(R.string.per_app_proxy),
+                onClick = onOpenPerAppProxy
             )
 
             Spacer(modifier = Modifier.height(16.dp))

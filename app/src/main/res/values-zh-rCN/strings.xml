@@ -159,4 +159,7 @@
     <!-- HTTP/3 -->
     <string name="not_yet_supported">暂不支持</string>
     <string name="requests">请求</string>
+    <string name="per_app_proxy">分应用代理</string>
+    <string name="per_app_proxy_description">选择不经过 VPN 的应用</string>
+    <string name="search_apps">搜索应用</string>
 </resources>

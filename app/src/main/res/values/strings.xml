@@ -31,6 +31,9 @@
     <string name="enable_anyway">Enable Anyway</string>
     <string name="encryption">Encryption</string>
     <string name="requests">Requests</string>
+    <string name="per_app_proxy">Per-App Proxy</string>
+    <string name="per_app_proxy_description">Select apps to bypass the VPN</string>
+    <string name="search_apps">Search apps</string>
     <string name="fingerprint">Fingerprint</string>
     <string name="flow">Flow</string>
     <string name="go_to_settings">Go to Settings</string>
